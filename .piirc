@@ -1,0 +1,3 @@
+use HTTP::CDN;
+
+HTTP::CDN->dynamic_manifest('test', 't/data', { base => 'cdn/' });

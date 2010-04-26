@@ -1,0 +1,4 @@
+body {
+    background: url(background.gif);
+    background: url(/background.gif);
+}
