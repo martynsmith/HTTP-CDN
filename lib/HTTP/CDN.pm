@@ -453,8 +453,8 @@ sub process_css { # {{{
         if ( substr($1, 0, 1) eq '/' ) {
             my $uri = substr($1,1);
             push @{$fdata->{deps}}, $uri;
-            $uri = _dynamic_uri($namespace,$uri);
-            "url(/$uri)"
+            $uri = $nsdata->{base} . _dynamic_uri($namespace,$uri);
+            "url($uri)"
         }
         else {
             push @{$fdata->{deps}}, $dir.$1;
