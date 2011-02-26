@@ -36,7 +36,7 @@ HTTP::CDN - Easily manage far-future expiry static content
 
 =head1 DESCRIPTION
 
-HTTP::CDN is a tool to easily generate unique URIs based on the mtime of a
+HTTP::CDN is a tool to easily generate unique URIs based on the content of a
 file. It can operate either in dynamic mode (i.e. on-the-fly) or in static mode
 (nice for production).
 
@@ -79,7 +79,6 @@ use Exception::Class ( # {{{
 
 my %EXTENSIONS = map { $_ => undef } qw(css js gif png jpg jpeg ico);
 $EXTENSIONS{css} = \&process_css;
-$EXTENSIONS{js} = \&process_js;
 
 my %CONTENT_TYPE_FOR = (
     css  => 'text/css',
@@ -256,7 +255,6 @@ sub dynamic_manifest { # {{{
     $nsdata->{namespace} = $namespace;
     $nsdata->{src_path}  = File::Spec->rel2abs($src_path) . '/';
     $nsdata->{base}      = $options->{base} || '';
-    $nsdata->{yui_jar}   = $options->{yui_jar},
     $nsdata->{map}       = {};
 
     error_manifest error => "Source directory for dynamic manifest doesn't exist: $nsdata->{src_path}" unless -d $nsdata->{src_path};
@@ -264,11 +262,12 @@ sub dynamic_manifest { # {{{
     {
         no strict 'refs';
         no warnings 'redefine';
-        *{ $namespace . '::uri' }     = sub { $nsdata->{base} . _dynamic_uri(@_)     };
+        *{ $namespace . '::uri' }     = sub { $nsdata->{base} . _dynamic_uri(@_) };
         *{ $namespace . '::content' } = sub { _dynamic_content(@_) };
         *{ $namespace . '::info' } = sub { _dynamic_info(@_) };
     }
 } # }}}
+
 
 =head2 _dynamic_uri
 
@@ -396,28 +395,6 @@ sub dynamic_update { # {{{
     return $updated;
 } # }}}
 
-=head2 process_js
-
-Internal function for pre-processing javascript files
-
-=cut
-sub process_js { # {{{
-    my ($namespace, $uri) = @_;
-
-    my $nsdata = $CDN{$namespace};
-    my $fdata = $nsdata->{map}{$uri};
-
-    if ( $nsdata->{yui_jar} ) {
-        $fdata->{content} = '';
-        my @cmd = ('java', '-jar' => $nsdata->{yui_jar}, '--type' => 'js', $fdata->{filename});
-        open FILE, '-|', @cmd;
-        while (<FILE>) {
-            $fdata->{content} .= $_;
-        }
-        close FILE;
-    }
-} # }}}
-
 =head2 process_css
 
 Internal function for pre-processing css files
@@ -435,18 +412,7 @@ sub process_css { # {{{
         $dir;
     };
 
-    if ( $nsdata->{yui_jar} ) {
-        $fdata->{content} = '';
-        my @cmd = ('java', '-jar' => $nsdata->{yui_jar}, '--type' => 'css', $fdata->{filename});
-        open FILE, '-|', @cmd;
-        while (<FILE>) {
-            $fdata->{content} .= $_;
-        }
-        close FILE;
-    }
-    else {
-        $fdata->{content} = scalar(read_file($fdata->{filename}));
-    }
+    $fdata->{content} = scalar(read_file($fdata->{filename}));
 
     $fdata->{deps} = [];
     $fdata->{content} =~ s{ url \( ([^)]+) \) }{
