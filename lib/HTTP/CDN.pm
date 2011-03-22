@@ -77,9 +77,6 @@ use Exception::Class ( # {{{
     },
 ); # }}}
 
-my %EXTENSIONS = map { $_ => undef } qw(css js gif png jpg jpeg ico);
-$EXTENSIONS{css} = \&process_css;
-
 my %CONTENT_TYPE_FOR = (
     css  => 'text/css',
     js   => 'application/x-javascript',
@@ -87,7 +84,12 @@ my %CONTENT_TYPE_FOR = (
     gif  => 'image/gif',
     jpg  => 'image/jpeg',
     jpeg => 'image/jpeg',
+    ttf  => 'application/x-font-ttf',
 );
+
+my %EXTENSIONS = map { $_ => undef } keys %CONTENT_TYPE_FOR;
+$EXTENSIONS{css} = \&process_css;
+
 
 my %CDN;
 
