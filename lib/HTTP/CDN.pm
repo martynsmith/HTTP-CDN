@@ -9,7 +9,7 @@ use File::Spec;
 use Digest::MD5;
 use File::Basename;
 
-our $VERSION = '0.01';
+our $VERSION = '0.1';
 
 # {{{ POD
 =head1 NAME
