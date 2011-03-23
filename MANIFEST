@@ -2,5 +2,11 @@ Changes
 Makefile.PL
 MANIFEST
 README
-t/HTTP-CDN.t
+t/data/script.js
+t/data/style.css
+t/data/background.gif
+t/dynamic.t
+t/errors.t
+t/static.t
 lib/HTTP/CDN.pm
+lib/Catalyst/Plugin/CDN.pm
