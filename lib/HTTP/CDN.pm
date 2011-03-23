@@ -247,7 +247,6 @@ respectively
 sub dynamic_manifest { # {{{
     my ($self, $namespace, $src_path, $options) = @_;
 
-
     $options ||= {};
 
     $namespace = __PACKAGE__ . '::' . $namespace;
@@ -417,18 +416,20 @@ sub process_css { # {{{
     $fdata->{content} = scalar(read_file($fdata->{filename}));
 
     $fdata->{deps} = [];
-    $fdata->{content} =~ s{ url \( ([^)]+) \) }{
-        if ( substr($1, 0, 1) eq '/' ) {
-            my $uri = substr($1,1);
+
+    $fdata->{content} =~ s{ url \( (["']?) ([^)]+) \1 \) }{
+        my ($quotes, $match) = ($1, $2);
+        if ( substr($match, 0, 1) eq '/' ) {
+            my $uri = substr($match,1);
             push @{$fdata->{deps}}, $uri;
             $uri = $nsdata->{base} . _dynamic_uri($namespace,$uri);
-            "url($uri)"
+            "url($quotes$uri$quotes)"
         }
         else {
-            push @{$fdata->{deps}}, $dir.$1;
-            my $uri = _dynamic_uri($namespace,$dir.$1);
+            push @{$fdata->{deps}}, $dir.$match;
+            my $uri = _dynamic_uri($namespace,$dir.$match);
             $uri =~ s/^$dir//;
-            "url($uri)"
+            "url($quotes$uri$quotes)"
         }
     }egx;
 } # }}}
