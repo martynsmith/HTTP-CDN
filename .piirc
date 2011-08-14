@@ -1,3 +1,16 @@
+# vim: filetype=perl
+
+use 5.010;
 use HTTP::CDN;
 
-HTTP::CDN->dynamic_manifest('test', 't/data', { base => 'cdn/' });
+$cdn = HTTP::CDN->new(
+    root => 't/data',
+    base => '/cdn/',
+    plugins => [qw(
+        CSS::LESSp
+        CSS
+        CSS::Minifier::XS
+        JavaScript::Minifier::XS
+    )],
+);
+say $cdn->filedata('style.less');

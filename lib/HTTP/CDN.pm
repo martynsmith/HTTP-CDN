@@ -2,438 +2,196 @@ package HTTP::CDN;
 
 use strict;
 use warnings;
-use JSON;
-use File::Find;
-use File::Slurp;
-use File::Spec;
+
+use Moose;
+use Moose::Util::TypeConstraints;
+
+use URI;
+use Path::Class;
+use MIME::Types;
 use Digest::MD5;
-use File::Basename;
+use Module::Load;
 
-our $VERSION = '0.1';
+our $mimetypes = MIME::Types->new;
+use constant EXPIRES => 315_576_000; # ~ 10 years
 
-# {{{ POD
-=head1 NAME
+subtype 'HTTP::CDN::Dir' => as class_type('Path::Class::Dir');
+subtype 'HTTP::CDN::URI' => as class_type('URI');
 
-HTTP::CDN - Easily manage far-future expiry static content
+coerce 'HTTP::CDN::Dir' => from 'Str' => via { Path::Class::dir($_)->resolve->absolute };
+coerce 'HTTP::CDN::URI' => from 'Str' => via { URI->new($_) };
 
-=head1 SYNOPSIS
-
-  use HTTP::CDN;
-
-  HTTP::CDN->dynamic_manifest(
-    'mynamespace',
-    '/path/to/static',
-  );
-
-  my $path = HTTP::CDN::mynamespace->uri('css/style.css');
-
-  # $path is "css/style.<HEXDIGITS>.css"
-
-  my $content = HTTP::CDN::mynamespace->content('css/style.css');
-
-  # $content is stylesheet with all url() references updated to point to
-  # correct "CDN" filenames
-
-=head1 DESCRIPTION
-
-HTTP::CDN is a tool to easily generate unique URIs based on the content of a
-file. It can operate either in dynamic mode (i.e. on-the-fly) or in static mode
-(nice for production).
-
-=head1 AUTHOR
-
-Martyn Smith, E<lt>martyn@shoptime.co.nzE<gt>
-
-=head1 COPYRIGHT AND LICENSE
-
-Copyright (C) 2010 by Martyn Smith
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.10.0 or,
-at your option, any later version of Perl 5 you may have available.
-
-=cut
-# }}}
-
-use Exception::Class ( # {{{
-    'Exception::CDN',
-    'Exception::CDN::Manifest' => {
-        isa         => 'Exception::CDN',
-        description => 'Failed to read/write a manifest file',
-        fields      => ['manifest'],
-        alias       => 'error_manifest',
+has 'plugins' => (
+    traits   => ['Array'],
+    isa      => 'ArrayRef[Str]',
+    required => 1,
+    default  => sub { [qw(HTTP::CDN::CSS)] },
+    handles  => {
+        plugins => 'elements',
     },
-    'Exception::CDN::Missing' => {
-        isa         => 'Exception::CDN',
-        description => 'Requested a non-existant file from the CDN',
-        fields      => ['namespace', 'type', 'manifest'],
-        alias       => 'error_missing',
-    },
-    'Exception::CDN::FileType' => {
-        isa         => 'Exception::CDN',
-        description => 'Invalid file type encountered',
-        fields      => ['namespace', 'type', 'manifest'],
-        alias       => 'error_filetype',
-    },
-); # }}}
-
-my %CONTENT_TYPE_FOR = (
-    css  => 'text/css',
-    js   => 'application/x-javascript',
-    png  => 'image/png',
-    gif  => 'image/gif',
-    jpg  => 'image/jpeg',
-    jpeg => 'image/jpeg',
-    ttf  => 'application/x-font-ttf',
+);
+has 'base' => (
+    isa      => 'HTTP::CDN::URI',
+    is       => 'rw',
+    required => 1,
+    coerce   => 1,
+    default  => sub { URI->new('') },
+);
+has 'root' => (
+    isa      => 'HTTP::CDN::Dir',
+    is       => 'ro',
+    required => 1,
+    coerce   => 1,
+);
+has '_cache' => (
+    isa      => 'HashRef',
+    is       => 'ro',
+    required => 1,
+    default  => sub { {} },
 );
 
-my %EXTENSIONS = map { $_ => undef } keys %CONTENT_TYPE_FOR;
-$EXTENSIONS{css} = \&process_css;
-
-
-my %CDN;
-
-=head2 hash
-
-Generates a hash (suitable for injecting into the filename) of a given piece of
-content
-
-=cut
-sub hash { # {{{
-    my ($content) = @_;
-
-    return uc substr(Digest::MD5::md5_hex($content), 0, 12);
-} # }}}
-
-=head2 generate_manifest
-
-Generates a manifest and target directory file structure from a source
-directory.
-
-e.g.
-
-  HTTP::CDN->generate_manifest($src, $dst, $manifest, $options)
-
-Will read all files from $src and write them (with their new content and
-filenames) to $dst. After doing this, it will write out a JSON file detailing
-the mapping from source to destination path.
-
-=cut
-sub generate_manifest { # {{{
-    my ($self, $src_path, $dst_path, $manifest_file, $options) = @_;
-
-    my $namespace = __PACKAGE__ . '::__generate';
-    $dst_path = File::Spec->rel2abs($dst_path);
-
-    die "Invalid dst_path '$dst_path'" unless -d $dst_path;
-
-    $dst_path .= '/' unless $dst_path =~ m{/$};
-
-    $self->dynamic_manifest('__generate', $src_path, $options);
-
-    my $manifest = {};
-
-    my $atime = time;
-
-    my $callback = sub {
-        my $uri = $File::Find::name;
-        $uri =~ s{^$src_path/?}{}o;
-
-        if ( -d $_ ) {
-            mkdir($dst_path.$uri) unless -d $dst_path.$uri;
-            return;
-        }
-
-        $manifest->{$uri} = _dynamic_uri($namespace, $uri);
-        my $target_filename = $dst_path . $manifest->{$uri};
-        my $info = _dynamic_info($namespace, $uri);
-        write_file($target_filename, _dynamic_content($namespace, $uri));
-        utime $atime, $info->{mtime}, $target_filename;
-    };
-
-    find($callback, $src_path);
-
-    write_file($manifest_file, to_json($manifest));
-
-} # }}}
-
-=head2 load_manifest
-
-Loads a manifest generated by generate_manifest above and provides a uri method
-on the specified namespace
-
-e.g.
-
-  HTTP::CDN->load_manifest('namespace', $manifest, $base)
-
-Will read the JSON $manifest file and make a function that can be called:
-
-  HTTP::CDN::namespace->uri($file);
-
-which will return the new filename for $file (prefixed with $base if
-specified).
-
-=cut
-sub load_manifest { # {{{
-    my ($self, $namespace, $manifest, $base) = @_;
-
-    $namespace = __PACKAGE__ . '::' . $namespace;
-
-    my $data = $CDN{$namespace} = {};
-    $data->{type}      = 'static';
-    $data->{namespace} = $namespace;
-    $data->{manifest}  = File::Spec->rel2abs($manifest);
-    $data->{base}      = $base || '';
-    $data->{map}       = eval { from_json(scalar(read_file($manifest))); };
-
-    error_manifest error => $@, manifest => $data->{manifest} if $@;
-
-    {
-        no strict 'refs';
-        no warnings 'redefine';
-        *{ $namespace . '::uri' } = sub { _static_uri(@_); };
-    }
-} # }}}
-
-=head2 _static_uri
-
-Internal function used by load_manifest
-
-=cut
-sub _static_uri { # {{{
-    my ($namespace, $uri) = @_;
-
-    my $nsdata = $CDN{$namespace};
-
-    error_missing
-        error     => "No URI specified in lookup",
-        manifest  => $nsdata->{manifest},
-        namespace => $nsdata->{namespace},
-        type      => $nsdata->{type},
-    unless $uri;
-
-    return $nsdata->{base} . $nsdata->{map}{$uri} if exists $nsdata->{map}{$uri};
-
-    error_missing
-        error     => "Couldn't find file: $uri",
-        manifest  => $nsdata->{manifest},
-        namespace => $nsdata->{namespace},
-        type      => $nsdata->{type},
-    ;
-} # }}}
-
-=head2 dynamic_manifest
-
-Provides functionality for generating far-future expire paths on the fly. It's
-basically like doing a generate_manifest() and load_manifest() every time a
-file changes, but only calculates hashes as they're requested
-
-e.g.
-
-  HTTP::CDN->dynamic_manifest('mynamespace', $src, $options)
-
-Will provide functions
-
-- HTTP::CDN::mynamespace->uri($path)
-
-- HTTP::CDN::mynamespace->content($path)
-
-- HTTP::CDN::mynamespace->info($path)
-
-Which return the new path, file content, and metadata about the path
-respectively
-
-=cut
-sub dynamic_manifest { # {{{
-    my ($self, $namespace, $src_path, $options) = @_;
-
-    $options ||= {};
-
-    $namespace = __PACKAGE__ . '::' . $namespace;
-
-    my $nsdata = $CDN{$namespace} = {};
-    $nsdata->{type}      = 'dynamic';
-    $nsdata->{namespace} = $namespace;
-    $nsdata->{src_path}  = File::Spec->rel2abs($src_path) . '/';
-    $nsdata->{base}      = $options->{base} || '';
-    $nsdata->{map}       = {};
-
-    error_manifest error => "Source directory for dynamic manifest doesn't exist: $nsdata->{src_path}" unless -d $nsdata->{src_path};
-
-    {
-        no strict 'refs';
-        no warnings 'redefine';
-        *{ $namespace . '::uri' }     = sub { $nsdata->{base} . _dynamic_uri(@_) };
-        *{ $namespace . '::content' } = sub { _dynamic_content(@_) };
-        *{ $namespace . '::info' } = sub { _dynamic_info(@_) };
-    }
-} # }}}
-
-
-=head2 _dynamic_uri
-
-Internal function for dynamic manifests
-
-=cut
-sub _dynamic_uri { # {{{
-    my ($namespace, $uri) = @_;
-
-    dynamic_update($namespace, $uri);
-
-    return $CDN{$namespace}->{map}{$uri}{newuri};
-} # }}}
-
-=head2 _dynamic_content
-
-Internal function for dynamic manifests
-
-=cut
-sub _dynamic_content { # {{{
-    my ($namespace, $uri) = @_;
-
-    dynamic_update($namespace, $uri);
-
-    my $fdata = $CDN{$namespace}->{map}{$uri};
-
-    return $fdata->{content} // scalar(read_file($fdata->{filename}));
-} # }}}
-
-=head2 _dynamic_info
-
-Internal function for dynamic manifests
-
-=cut
-sub _dynamic_info { # {{{
-    my ($namespace, $uri) = @_;
-
-    dynamic_update($namespace, $uri);
-
-    my $fdata = $CDN{$namespace}->{map}{$uri};
-
-    return {
-        extension => $fdata->{extension},
-        hash      => $fdata->{hash},
-        mtime     => $fdata->{mtime},
-        mime      => $fdata->{mime},
-    };
-} # }}}
-
-=head2 dynamic_update
-
-Internal function for updating internal metadata for a single path (and its
-dependancies)
-
-=cut
-sub dynamic_update { # {{{
-    my ($namespace, $uri) = @_;
-
-    my $nsdata = $CDN{$namespace};
-
-    error_missing
-        error     => 'No URI specified in lookup',
-        manifest  => $nsdata->{src_path},
-        namespace => $namespace,
-        type      => $nsdata->{type},
-    unless $uri;
-
-    my $fdata = $nsdata->{map}{$uri} ||= do {
-        my $extension = $uri;
-        $extension =~ s/(.*)\.//;
-
-        error_filetype
-            error    => "Invalid file extension: $extension",
-            manifest => $nsdata->{src_path},
-            namespace => $namespace,
-            type => $nsdata->{type},
-        unless exists $EXTENSIONS{$extension};
-
-        my $uri_noext = $1;
-        {
-            filename  => $nsdata->{src_path} . $uri,
-            mime      => $CONTENT_TYPE_FOR{$extension},
-            extension => $extension,
-            mtime     => 0,
-            newuri    => '',
-            uri_noext => $uri_noext,
-        }
-    };
-
-    my $mtime = (stat $fdata->{filename})[9];
-
-    error_missing
-        error     => "Couldn't find file: $uri",
-        manifest  => $nsdata->{manifest},
-        namespace => $nsdata->{namespace},
-        type      => $nsdata->{type},
-    unless defined $mtime;
-
-    my $updated = 0;
-
-    if ( $mtime <= $fdata->{mtime} and exists $fdata->{deps} ) {
-        foreach my $dep ( @{$fdata->{deps}} ) {
-            $updated += dynamic_update($namespace, $dep);
-        }
-    }
-
-    if ( $mtime > $fdata->{mtime} or $updated ) {
-        if ( $EXTENSIONS{$fdata->{extension}} ) {
-            $EXTENSIONS{$fdata->{extension}}->($namespace, $uri);
-        }
-
-        if ( exists $fdata->{content} ) {
-            $fdata->{hash} = hash($fdata->{content});
+sub BUILD {
+    my ($self) = @_;
+
+    my @plugins;
+
+    foreach my $plugin ( $self->plugins ) {
+        eval { load "HTTP::CDN::$plugin" };
+        if ( $@ ) {
+            load $plugin;
         }
         else {
-            $fdata->{hash} = hash(scalar(read_file($fdata->{filename})));
+            $plugin = "HTTP::CDN::$plugin";
         }
-
-        $fdata->{newuri} = sprintf('%s.%s.%s', $fdata->{uri_noext}, $fdata->{hash}, $fdata->{extension});
-
-        $fdata->{mtime} = $mtime;
-        $updated++;
+        push @plugins, $plugin;
     }
+    $self->{plugins} = \@plugins;
+}
 
-    return $updated;
-} # }}}
+sub to_plack_app {
+    my ($self) = @_;
 
-=head2 process_css
+    load 'Plack::Request';
+    load 'Plack::Response';
 
-Internal function for pre-processing css files
+    return sub {
+        my $request = Plack::Request->new(@_);
+        my $response = Plack::Response->new(200);
 
-=cut
-sub process_css { # {{{
-    my ($namespace, $uri) = @_;
+        my ($uri, $hash) = $self->unhash_uri($request->path);
 
-    my $nsdata = $CDN{$namespace};
-    my $fdata = $nsdata->{map}{$uri};
+        my $info = eval { $self->fileinfo($uri) };
 
-    my $dir = $fdata->{dir} ||= do {
-        my $dir = File::Basename::dirname($uri);
-        $dir .= '/' if $dir;
-        $dir;
-    };
-
-    $fdata->{content} = scalar(read_file($fdata->{filename}));
-
-    $fdata->{deps} = [];
-
-    $fdata->{content} =~ s{ url \( (["']?) ([^)]+) \1 \) }{
-        my ($quotes, $match) = ($1, $2);
-        if ( substr($match, 0, 1) eq '/' ) {
-            my $uri = substr($match,1);
-            push @{$fdata->{deps}}, $uri;
-            $uri = $nsdata->{base} . _dynamic_uri($namespace,$uri);
-            "url($quotes$uri$quotes)"
+        unless ( $info and $info->{hash} eq $hash ) {
+            $response->status(404);
+            $response->content_type( 'text/plain' );
+            $response->body( 'HTTP::CDN - not found' );
+            return $response->finalize;
         }
-        else {
-            push @{$fdata->{deps}}, $dir.$match;
-            my $uri = _dynamic_uri($namespace,$dir.$match);
-            $uri =~ s/^$dir//;
-            "url($quotes$uri$quotes)"
+
+        $response->status( 200 );
+        $response->content_type( $info->{mime}->type );
+        $response->headers->header('Last-Modified' => HTTP::Date::time2str($info->{stat}->mtime));
+        $response->headers->header('Expires' => HTTP::Date::time2str(time + EXPIRES));
+        $response->headers->header('Cache-Control' => 'max-age=' . EXPIRES . ', public');
+        $response->body($self->filedata($uri));
+        return $response->finalize;
+    }
+}
+
+sub unhash_uri {
+    my ($self, $uri) = @_;
+
+    unless ( $uri =~ s/\.([0-9A-F]{12})\.([^.]+)$/\.$2/ ) {
+        return;
+    }
+    my $hash = $1;
+    return wantarray ? ($uri, $hash) : $uri;
+}
+
+sub cleanup_uri {
+    my ($self, $uri) = @_;
+
+    return $self->root->file($uri)->resolve->relative($self->root);
+}
+
+sub resolve {
+    my ($self, $uri) = @_;
+
+    my $fileinfo = $self->update($uri);
+
+    return $self->base . $fileinfo->{components}{cdnfile};
+}
+
+sub fileinfo {
+    my ($self, $uri) = @_;
+
+    return $self->update($uri);
+}
+
+sub filedata {
+    my ($self, $uri) = @_;
+
+    return $self->_fileinfodata($self->update($uri));
+}
+
+sub _fileinfodata {
+    my ($self, $fileinfo) = @_;
+
+    return $fileinfo->{data} // scalar($fileinfo->{fullpath}->slurp);
+}
+
+sub update {
+    my ($self, $uri) = @_;
+
+    die "No URI specified" unless $uri;
+
+    my $file = $self->cleanup_uri($uri);
+
+    my $fileinfo = $self->_cache->{$file} ||= {};
+
+    my $fullpath = $fileinfo->{fullpath} //= $self->root->file($file);
+
+    my $stat = $fullpath->stat;
+
+    die "Failed to stat $fullpath" unless $stat;
+
+    my $mime = $fileinfo->{mime} //= $mimetypes->mimeTypeOf($file);
+
+    unless ( $fileinfo->{stat} and $fileinfo->{stat}->mtime == $stat->mtime ) {
+        delete $fileinfo->{data};
+        $fileinfo->{dependancies} = {};
+
+        $fileinfo->{components} = do {
+            my $extension = "$file";
+            $extension =~ s/(.*)\.//;
+            {
+                file      => "$file",
+                extension => $extension,
+                barename  => $1,
+            }
+        };
+
+        foreach my $plugin ( $self->plugins ) {
+            next unless $plugin->can('preprocess');
+            $plugin->can('preprocess')->($self, $file, $stat, $fileinfo);
         }
-    }egx;
-} # }}}
+
+        # Need to update this file
+        $fileinfo->{hash} = $self->hash_fileinfo($fileinfo);
+        $fileinfo->{components}{cdnfile} = join('.', $fileinfo->{components}{barename}, $fileinfo->{hash}, $fileinfo->{components}{extension});
+    }
+    # TODO - need to check dependancies?
+
+    $fileinfo->{stat} = $stat;
+
+    return $fileinfo;
+}
+
+sub hash_fileinfo {
+    my ($self, $fileinfo) = @_;
+
+    return uc substr(Digest::MD5::md5_hex(scalar($self->_fileinfodata($fileinfo))), 0, 12);
+}
 
 1;
-
-__END__

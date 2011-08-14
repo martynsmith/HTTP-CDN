@@ -1,7 +1,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 8;
+use Test::More tests => 4;
 use Digest::MD5 qw(md5_hex);
 
 my %MD5_FOR = (
@@ -12,36 +12,18 @@ my %MD5_FOR = (
 BEGIN { use_ok('HTTP::CDN') };
 
 # dynamic init
-HTTP::CDN->dynamic_manifest('dynamic', 't/data/', { base => 'cdn/' });
+my $cdn = HTTP::CDN->new(
+    root => 't/data',
+    base => 'cdn/',
+);
 
 # static init
-mkdir 't/cdn/';
-HTTP::CDN->generate_manifest('t/data', 't/cdn', 't/manifest.json');
-HTTP::CDN->generate_manifest('t/data/', 't/cdn/', 't/manifest.json');
-HTTP::CDN->load_manifest('static', 't/manifest.json', 'cdn/');
+eval { $cdn->resolve('404.pants'); };
+like($@, qr/^Failed to stat/);
 
-eval { HTTP::CDN->generate_manifest('t/data/', 't/non-existing-path', 't/manifest.json'); };
-like($@, qr/Invalid dst_path/);
+eval { $cdn->resolve(); };
+like($@, qr/No URI specified/);
 
-eval { HTTP::CDN::dynamic->uri('404.pants'); };
-like($@, qr/Invalid file extension: pants/);
+eval { $cdn->resolve('404.css'); };
+like($@, qr/^Failed to stat/);
 
-eval { HTTP::CDN::static->uri('404.pants'); };
-like($@, qr/Couldn't find file: 404.pants/);
-
-eval { HTTP::CDN::dynamic->uri(); };
-like($@, qr/No URI specified in lookup/);
-
-eval { HTTP::CDN::static->uri(); };
-like($@, qr/No URI specified in lookup/);
-
-eval { HTTP::CDN::dynamic->uri('404.css'); };
-like($@, qr/Couldn't find file: 404.css/);
-
-eval { HTTP::CDN::static->uri('404.css'); };
-like($@, qr/Couldn't find file: 404.css/);
-
-
-# static cleanup
-unlink 't/manifest.json';
-system('rm', '-rf', 't/cdn');

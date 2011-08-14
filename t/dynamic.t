@@ -13,23 +13,29 @@ my %MD5_FOR = (
 
 BEGIN { use_ok('HTTP::CDN') };
 
-HTTP::CDN->dynamic_manifest('dynamic', 't/data/', { base => 'cdn/' });
+my $cdn = HTTP::CDN->new(
+    root => 't/data',
+    base => 'cdn/',
+);
 
 foreach my $file ( sort keys %MD5_FOR ) {
     my $expected = $file;
     my $hash = uc(substr($MD5_FOR{$file}, 0, 12));
     $expected =~ s/(.*)\.(.*)/"$1.$hash.$2"/e;
-    is(HTTP::CDN::dynamic->uri($file), "cdn/$expected", "Generates correct URI for $file");
+    is($cdn->resolve($file), "cdn/$expected", "Generates correct URI for $file");
 }
-is(md5_hex(HTTP::CDN::dynamic->content('style.css')), $MD5_FOR{'style.css'});
-is(md5_hex(HTTP::CDN::dynamic->content('script.js')), $MD5_FOR{'script.js'});
-is(md5_hex(HTTP::CDN::dynamic->content('background.gif')), $MD5_FOR{'background.gif'});
-my $info = HTTP::CDN::dynamic->info('style.css');
+is(md5_hex($cdn->filedata('style.css')), $MD5_FOR{'style.css'});
+is(md5_hex($cdn->filedata('script.js')), $MD5_FOR{'script.js'});
+is(md5_hex($cdn->filedata('background.gif')), $MD5_FOR{'background.gif'});
+my $info = $cdn->fileinfo('style.css');
 is($info->{hash}, uc substr($MD5_FOR{'style.css'},0,12));
-is($info->{extension}, 'css');
-is($info->{mime}, 'text/css');
+is($info->{components}{extension}, 'css');
+is($info->{mime}->type, 'text/css');
 
-HTTP::CDN->dynamic_manifest('baredynamic', 't/data/');
+$cdn = HTTP::CDN->new(
+    root => 't/data',
+    base => '',
+);
 
 # For the bare dynamic the MD5 of the stylesheet changes (due to the root path
 # being different)
@@ -39,5 +45,5 @@ foreach my $file ( sort keys %MD5_FOR ) {
     my $expected = $file;
     my $hash = uc(substr($MD5_FOR{$file}, 0, 12));
     $expected =~ s/(.*)\.(.*)/"$1.$hash.$2"/e;
-    is(HTTP::CDN::baredynamic->uri($file), "$expected");
+    is($cdn->resolve($file), "$expected");
 }

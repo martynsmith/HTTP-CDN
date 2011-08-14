@@ -17,16 +17,14 @@ around dispatch => sub {
     my $orig = shift;
     my ($c) = @_;
 
+    my $cdn = $c->config->{'Plugin::CDN'}{cdn};
+
     # TODO - this path match should be using the configurable 'base' below
     if ( $c->req->path =~ m{ \A cdn/ (.*) \z }xms ) {
-        my $uri = $1;
-        unless ( $uri =~ s/\.([0-9A-F]{12})\.([^.]+)$/\.$2/ ) {
-            $c->res->status( 404 );
-            $c->res->content_type( 'text/html' );
-            return;
-        }
-        my $hash = $1;
-        my $info = eval { HTTP::CDN::dynamic->info($uri) };
+        my ($uri, $hash) = $cdn->unhash_uri($1);
+
+        my $info = eval { $cdn->fileinfo($uri) };
+
         unless ( $info and $info->{hash} eq $hash ) {
             $c->res->status( 404 );
             $c->res->content_type( 'text/html' );
@@ -38,11 +36,11 @@ around dispatch => sub {
         }
 
         $c->res->status( 200 );
-        $c->res->content_type( $info->{mime} );
-        $c->res->headers->header('Last-Modified' => HTTP::Date::time2str($info->{mtime}));
+        $c->res->content_type( $info->{mime}->type );
+        $c->res->headers->header('Last-Modified' => HTTP::Date::time2str($info->{stat}->mtime));
         $c->res->headers->header('Expires' => HTTP::Date::time2str(time + EXPIRES));
         $c->res->headers->header('Cache-Control' => 'max-age=' . EXPIRES . ', public');
-        $c->res->body(HTTP::CDN::dynamic->content($uri));
+        $c->res->body($cdn->filedata($uri));
         return;
     }
     else {
@@ -53,12 +51,20 @@ around dispatch => sub {
 before setup_finalize => sub {
     my ($c) = @_;
 
-    # TODO - this should be configurable
-    my $root = dir($c->config->{home}, 'cdn');
+    my $plugin_config = $c->config->{'Plugin::CDN'} // {};
 
-    HTTP::CDN->dynamic_manifest('dynamic', $root, {
-        base => $c->config->{'Plugin::CDN'}{base_uri} // '/cdn/',
-    });
+    my $root = $plugin_config->{root} //= $c->path_to('cdn');
+    my $base = $plugin_config->{base} //= '/cdn/';
+    my $plugins = $plugin_config->{plugins};
+    unless ( UNIVERSAL::isa($plugin_config->{plugins}, 'ARRAY') ) {
+        $plugins = $plugin_config->{plugins} = undef;
+    }
+
+    $c->config->{'Plugin::CDN'}{cdn} = HTTP::CDN->new(
+        root    => $root,
+        base    => $base,
+        ( $plugins ? (plugins => $plugins) : () ),
+    );
 };
 
 =head2 cdn
@@ -75,7 +81,9 @@ a hash of the file content, this URI will automatically be served up correctly.
 sub cdn {
     my ($c, $uri) = @_;
 
-    return HTTP::CDN::dynamic->uri($uri, $c->stash->{cdn_hint});
+    my $cdn = $c->config->{'Plugin::CDN'}{cdn};
+
+    return $cdn->resolve($uri);
 }
 
 1;
