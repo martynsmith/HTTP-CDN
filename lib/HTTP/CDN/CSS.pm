@@ -34,13 +34,11 @@ sub url_replace {
     }
 
     # File is relative to the stylesheet
-    my $new_url = $match;
-
     my $subinfo = $cdn->fileinfo($fileinfo->{fullpath}->dir->file($match)->relative($cdn->root));
 
     $fileinfo->{dependancies}{$subinfo->{components}{file}}++;
 
-    $new_url = Path::Class::file($match)->dir->file(Path::Class::file($subinfo->{components}{cdnfile})->basename)->resolve;
+    my $new_url = Path::Class::file($match)->dir->file(Path::Class::file($subinfo->{components}{cdnfile})->basename)->cleanup;
 
     return "url(${quotes}${new_url}${quotes})";
 }

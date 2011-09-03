@@ -114,7 +114,7 @@ sub unhash_uri {
 sub cleanup_uri {
     my ($self, $uri) = @_;
 
-    return $self->root->file($uri)->resolve->relative($self->root);
+    return $self->root->file($uri)->cleanup->relative($self->root);
 }
 
 sub resolve {
