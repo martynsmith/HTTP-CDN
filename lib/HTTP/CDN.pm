@@ -3,7 +3,7 @@ package HTTP::CDN;
 use strict;
 use warnings;
 
-our $VERSION = '0.2';
+our $VERSION = '0.3';
 
 use Moose;
 use Moose::Util::TypeConstraints;
