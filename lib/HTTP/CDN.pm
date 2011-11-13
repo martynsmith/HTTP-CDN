@@ -15,6 +15,8 @@ use Digest::MD5;
 use Module::Load;
 
 our $mimetypes = MIME::Types->new;
+our $default_mimetype = $mimetypes->type('application/octet-stream');
+
 use constant EXPIRES => 315_576_000; # ~ 10 years
 
 subtype 'HTTP::CDN::Dir' => as class_type('Path::Class::Dir');
@@ -158,7 +160,7 @@ sub update {
 
     die "Failed to stat $fullpath" unless $stat;
 
-    my $mime = $fileinfo->{mime} //= $mimetypes->mimeTypeOf($file);
+    my $mime = $fileinfo->{mime} //= $mimetypes->mimeTypeOf($file) // $default_mimetype;
 
     unless ( $fileinfo->{stat} and $fileinfo->{stat}->mtime == $stat->mtime ) {
         delete $fileinfo->{data};
