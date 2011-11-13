@@ -31,16 +31,18 @@ around dispatch => sub {
             return;
         }
 
-        if ( $c->log->can('abort') ) {
-            $c->log->abort(1);
-        }
-
         $c->res->status( 200 );
         $c->res->content_type( $info->{mime}->type );
         $c->res->headers->header('Last-Modified' => HTTP::Date::time2str($info->{stat}->mtime));
         $c->res->headers->header('Expires' => HTTP::Date::time2str(time + EXPIRES));
         $c->res->headers->header('Cache-Control' => 'max-age=' . EXPIRES . ', public');
         $c->res->body($cdn->filedata($uri));
+
+        # We do this at the very end incase something goes horribly wrong beforehand
+        if ( $c->log->can('abort') ) {
+            $c->log->abort(1);
+        }
+
         return;
     }
     else {
