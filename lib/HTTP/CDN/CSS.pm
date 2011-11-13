@@ -11,7 +11,7 @@ sub preprocess {
     return unless $fileinfo->{mime} and $fileinfo->{mime}->type eq 'text/css';
 
     $fileinfo->{data} = $cdn->_fileinfodata($fileinfo);
-    $fileinfo->{data} =~ s{ url \( (["']?) ([^)]+) \1 \) }{ url_replace($cdn, $file, $stat, $fileinfo, $1, $2); }egx;
+    $fileinfo->{data} =~ s{ url \( (["']?) ([^)]+) \1 \) }{ 'url(' . url_replace($cdn, $file, $stat, $fileinfo, $1, $2) . ')'; }egx;
 }
 
 sub url_replace {
@@ -21,7 +21,7 @@ sub url_replace {
 
     # Absolute links with a host just remain unchanged
     if ( $match->can('host') and $match->host ) {
-        return "url(${quotes}${match}${quotes})";
+        return "${quotes}${match}${quotes}";
     }
 
     # Absolute links with (i.e. those starting with /) are treated as
@@ -30,7 +30,7 @@ sub url_replace {
         my $subinfo = $cdn->fileinfo($match);
         $fileinfo->{dependancies}{$subinfo->{components}{file}}++;
         my $new_url = $cdn->base . $subinfo->{components}{cdnfile};
-        return "url(${quotes}${new_url}${quotes})";
+        return "${quotes}${new_url}${quotes}";
     }
 
     # File is relative to the stylesheet
@@ -40,7 +40,7 @@ sub url_replace {
 
     my $new_url = Path::Class::file($match)->dir->file(Path::Class::file($subinfo->{components}{cdnfile})->basename)->cleanup;
 
-    return "url(${quotes}${new_url}${quotes})";
+    return "${quotes}${new_url}${quotes}";
 }
 
 1;
