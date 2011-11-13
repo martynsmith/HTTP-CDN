@@ -150,9 +150,18 @@ sub update {
 
     die "No URI specified" unless $uri;
 
+    my $force_update;
+
+    my $fragment = $1 if $uri =~ s/(#.*)//;
+
     my $file = $self->cleanup_uri($uri);
 
     my $fileinfo = $self->_cache->{$file} ||= {};
+
+    unless ( $fragment ~~ $fileinfo->{components}{fragment} ) {
+        $fileinfo->{components}{fragment} = $fragment;
+        $force_update = 1;
+    }
 
     my $fullpath = $fileinfo->{fullpath} //= $self->root->file($file);
 
@@ -162,7 +171,7 @@ sub update {
 
     my $mime = $fileinfo->{mime} //= $mimetypes->mimeTypeOf($file) // $default_mimetype;
 
-    unless ( $fileinfo->{stat} and $fileinfo->{stat}->mtime == $stat->mtime ) {
+    unless ( not $force_update and $fileinfo->{stat} and $fileinfo->{stat}->mtime == $stat->mtime ) {
         delete $fileinfo->{data};
         $fileinfo->{dependancies} = {};
 
@@ -173,6 +182,7 @@ sub update {
                 file      => "$file",
                 extension => $extension,
                 barename  => $1,
+                fragment  => $fileinfo->{components}{fragment},
             }
         };
 
@@ -184,6 +194,7 @@ sub update {
         # Need to update this file
         $fileinfo->{hash} = $self->hash_fileinfo($fileinfo);
         $fileinfo->{components}{cdnfile} = join('.', $fileinfo->{components}{barename}, $fileinfo->{hash}, $fileinfo->{components}{extension});
+        $fileinfo->{components}{cdnfile} .= $fileinfo->{components}{fragment} if $fileinfo->{components}{fragment};
     }
     # TODO - need to check dependancies?
 
