@@ -169,9 +169,8 @@ sub update {
 
     die "Failed to stat $fullpath" unless $stat;
 
-    my $mime = $fileinfo->{mime} //= $mimetypes->mimeTypeOf($file) // $default_mimetype;
-
     unless ( not $force_update and $fileinfo->{stat} and $fileinfo->{stat}->mtime == $stat->mtime ) {
+        $fileinfo->{mime} = $mimetypes->mimeTypeOf($file) // $default_mimetype;
         delete $fileinfo->{data};
         $fileinfo->{dependancies} = {};
 
