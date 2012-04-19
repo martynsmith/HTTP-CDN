@@ -3,7 +3,6 @@ package HTTP::CDN::CSS::LESSJS;
 use strict;
 use warnings;
 use HTTP::CDN::CSS;
-use IPC::Open2;
 
 $HTTP::CDN::mimetypes->addType(
     MIME::Type->new(
@@ -19,12 +18,10 @@ sub preprocess {
 
     $fileinfo->{data} = $cdn->_fileinfodata($fileinfo);
 
-    my ($child_out, $child_in);
-    my $pid = open2($child_out, $child_in, 'lessc', '-');
-    print $child_in $fileinfo->{data};
-    close $child_in;
+    open my $fh, '-|', 'lessc', $fileinfo->{fullpath};
     local $/ = undef;
-    $fileinfo->{data} = <$child_out>;
+    $fileinfo->{data} = <$fh>;
+    close $fh;
 
     $fileinfo->{mime} = $HTTP::CDN::mimetypes->type('text/css');
 }
