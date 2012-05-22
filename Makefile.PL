@@ -5,7 +5,9 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME              => 'HTTP/CDN',
     VERSION_FROM      => 'lib/HTTP/CDN.pm', # finds $VERSION
-    PREREQ_PM         => {}, # e.g., Module::Name => 1.1
+    PREREQ_PM         => {
+        'MIME::Types' => 1.28,
+    },
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
       (ABSTRACT_FROM  => 'lib/HTTP/CDN.pm', # retrieve abstract from module
        AUTHOR         => 'Martyn Smith <martyn@shoptime.co.nz>') : ()),
