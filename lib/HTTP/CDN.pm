@@ -3,7 +3,19 @@ package HTTP::CDN;
 use strict;
 use warnings;
 
-our $VERSION = '0.6';
+# ABSTRACT: Serve static files with far-future expiry
+
+=head1 NAME
+
+HTTP::CDN
+
+=head1 DESCRIPTION
+
+Plugin for serving static files with far-future expiry.
+
+Additionally provides automatic minification/compiling of css/less/javascript
+
+=cut
 
 use Moose;
 use Moose::Util::TypeConstraints;
