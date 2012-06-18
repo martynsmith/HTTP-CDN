@@ -1,3 +1,7 @@
 Makefile.old
-HTTP-CDN-?.??.tar.gz
+HTTP-CDN-*.*.tar.gz
+HTTP-CDN-*.*/
 cover_db
+/penv
+/bin
+/.build
