@@ -206,13 +206,13 @@ sub update {
 
     my $force_update;
 
-    my $fragment = $1 if $uri =~ s/(#.*)//;
+    my $fragment = ($uri =~ s/(#.*)//) ? $1 : undef;
 
     my $file = $self->cleanup_uri($uri);
 
     my $fileinfo = $self->_cache->{$file} ||= {};
 
-    unless ( $fragment ~~ $fileinfo->{components}{fragment} ) {
+    if ( ($fragment // '') ne ($fileinfo->{components}{fragment} // '') ) {
         $fileinfo->{components}{fragment} = $fragment;
         $force_update = 1;
     }
