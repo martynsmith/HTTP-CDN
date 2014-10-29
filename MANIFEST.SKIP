@@ -1,0 +1,16 @@
+MANIFEST.SKIP
+^penv
+\.gitignore
+^\.git
+.*\.swp$
+^README.md$
+^Makefile$
+^blib/
+^pm_to_blib$
+^build-stamp$
+^install-stamp$
+^MakeMaker-\d
+\.old$
+\.bak$
+^HTTP-CDN
+.piirc
