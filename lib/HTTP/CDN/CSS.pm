@@ -27,6 +27,11 @@ sub url_replace {
         return "${quotes}${match}${suffix}${quotes}";
     }
 
+    #Embedded images just remain unchanged
+    if ( $match->can('data') and $match->data) {
+        return "${quotes}${match}${suffix}${quotes}";
+    }
+
     # Absolute links with (i.e. those starting with /) are treated as
     # referencing the top of the CDN
     if ( $match->path_segments and ($match->path_segments)[0] eq '' ) {
