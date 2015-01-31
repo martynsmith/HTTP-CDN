@@ -5,4 +5,5 @@ body {
     background: url('/background.gif');
     background: url("background.gif");
     background: url("/background.gif");
+    background: url(data:image/gif;base64,R0lGODlhEgIBAIAAAOzs7P///yH5BAAAAAAALAAAAAASAgEAAAIejI+py+0Po5y02gay3rz7D4biSJbmiabqyrbuC8MFADs=);
 }
